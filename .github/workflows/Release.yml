@@ -163,9 +163,12 @@ jobs:
         run: |
           cd mihomo
           # If Mihomo has a 'make lib_install' similar to sing-box:
-          make lib_install || echo "No 'make lib_install' found, skipping..."
+          # make lib_install || echo "No 'make lib_install' found, skipping..."
+          echo "No special build prep needed for Mihomo..."
           
           # Example: 
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
           export PATH="$PATH:$(go env GOPATH)/bin"
           gomobile init
 
