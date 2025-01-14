@@ -150,42 +150,41 @@ jobs:
       # 6) Setup Go
       ####################################################
       - name: Setup Go
-        if: env.SKIP_RELEASE == 'false'
         uses: actions/setup-go@v5
         with:
           go-version: '^1.23'
 
-      ####################################################
-      # 7) Install iOS library dependencies
-      ####################################################
-      - name: Install dependencies
-        if: env.SKIP_RELEASE == 'false'
+      - name: Install gomobile (optional)
         run: |
-          cd mihomo
-          # If Mihomo has a 'make lib_install' similar to sing-box:
-          # make lib_install || echo "No 'make lib_install' found, skipping..."
-          echo "No special build prep needed for Mihomo..."
-          
-          # Example: 
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
-          export PATH="$PATH:$(go env GOPATH)/bin"
-          gomobile init
 
-      ####################################################
-      # 8) Build the XCFramework
-      #    This is where you'd replicate the sing-box logic for iOS.
-      ####################################################
-      - name: Build xcframework
-        if: env.SKIP_RELEASE == 'false'
+      - name: Build iOS XCFramework
         run: |
           cd mihomo
-          # For sing-box, they do:
-          #   go run ./cmd/internal/build_libbox -target apple -platform ios
-          # Then zip. For Mihomo, adjust to your actual iOS build approach.
-          #
-          # Example:
-          go run ./cmd/internal/build_lib -target apple -platform ios
+          mkdir -p build/ios-arm64 build/ios-amd64
+
+          # 1) iOS device (arm64)
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+            go build -v -tags "with_gvisor" -trimpath \
+            -buildmode=c-archive \
+            -o build/ios-arm64/libmihomo.a \
+            ./cmd
+
+          # 2) iOS simulator (amd64)
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
+            go build -v -tags "with_gvisor" -trimpath \
+            -buildmode=c-archive \
+            -o build/ios-amd64/libmihomo.a \
+            ./cmd
+
+          xcodebuild -create-xcframework \
+            -library build/ios-arm64/libmihomo.a \
+              -headers build/ios-arm64 \
+            -library build/ios-amd64/libmihomo.a \
+              -headers build/ios-amd64 \
+            -output Mihomo.xcframework
+
           zip -ry Mihomo.xcframework.zip Mihomo.xcframework
 
       ####################################################
