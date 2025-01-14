@@ -1,0 +1,204 @@
+name: iOS-Release
+
+on:
+  # 1) Manual trigger
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git Tag to create or use (e.g. v1.2.3)"
+        required: true
+        type: string
+      delete_if_exists:
+        description: "If 'true', delete existing release/tag before recreating."
+        required: false
+        type: boolean
+        default: false
+
+  # 2) (Optional) Daily cron job
+  schedule:
+    - cron: "10 12 * * *"
+
+jobs:
+  release:
+    runs-on: macos-latest
+
+    steps:
+      # (A) If triggered by schedule, we might want the latest official release.
+      #     Otherwise, we use the user-provided input.
+      - name: Get latest stable Mihomo release (only on schedule)
+        if: ${{ github.event_name == 'schedule' }}
+        id: get_latest_release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: latest } = await github.rest.repos.getLatestRelease({
+              owner: 'MetaCubeX',
+              repo: 'mihomo'
+            })
+            core.setOutput('latest_tag', latest.tag_name)
+
+      - name: Define TAG
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "TAG=${{ steps.get_latest_release.outputs.latest_tag }}" >> $GITHUB_ENV
+          else
+            echo "TAG=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
+          fi
+        shell: bash
+
+      # Debug: show existing releases in the *same* repository (e.g. MetaCubeX/mihomo).
+      - name: Debug release list
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          brew update
+          brew install jq gh
+          echo "Listing all releases in the current repo:"
+          gh api repos/${{ github.repository }}/releases \
+            --paginate \
+            --jq '.[] | [.tag_name, .draft, .prerelease] | @tsv'
+
+      # Check if the given TAG already exists
+      - name: Check if release already exists
+        id: check_existing_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "TAG='${TAG}'"
+          existing_release=$(
+            gh release list --json tagName \
+              | jq -r '.[].tagName' \
+              | grep -x "${TAG}" \
+              | wc -l
+          )
+          if [ "$existing_release" -gt 0 ]; then
+            echo "Release '${TAG}' already exists."
+            echo "SKIP_RELEASE=true" >> $GITHUB_ENV
+          else
+            echo "SKIP_RELEASE=false" >> $GITHUB_ENV
+          fi
+
+      # Conditionally delete the existing release if user wants that
+      - name: Delete existing release if user requested
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          env.SKIP_RELEASE == 'true' &&
+          github.event.inputs.delete_if_exists == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Deleting existing release '${TAG}'..."
+          gh release delete "${TAG}" -y
+          echo "Successfully deleted release '${TAG}'."
+          # Now let us recreate it
+          echo "SKIP_RELEASE=false" >> $GITHUB_ENV
+
+      # If still true, skip
+      - name: Stop if release still exists
+        if: env.SKIP_RELEASE == 'true'
+        run: echo "Nothing to do. Release/tag '${{ env.TAG }}' already found."
+
+      # ============ Only run the build steps if SKIP_RELEASE == false ============
+
+      # 1) Checkout the current repository so that we have a .git folder
+      - name: Checkout current repo
+        if: env.SKIP_RELEASE == 'false'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2) (Optional) If you want to build from some other branch/tag of Mihomo,
+      #    you can re-checkout again with a specific ref. Often you only need one checkout.
+
+      # 3) Remove or patch the go-m1cpu library (which is not iOS-compatible)
+      #    If your code does not need go-m1cpu at all on iOS, remove/replace it:
+      - name: Remove/patch go-m1cpu on iOS
+        if: env.SKIP_RELEASE == 'false'
+        run: |
+          # Option A: forcibly remove the library from go.mod or replace with an empty module
+          go mod edit -replace github.com/shoenig/go-m1cpu=github.com/shoenig/go-m1cpu@v0.1.5
+          # OR if you prefer, you can remove references in your own code or via a patch:
+          # sed -i '' '/go-m1cpu/d' ./yourfile.go
+          go mod tidy
+
+      # 4) Setup Go
+      - name: Setup Go
+        if: env.SKIP_RELEASE == 'false'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '^1.23'
+
+      # 5) Install the iOS library build prerequisites (gomobile, etc.)
+      - name: Install iOS build deps
+        if: env.SKIP_RELEASE == 'false'
+        run: |
+          # Example commands - adapt to your real code
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+
+      # 6) Build the XCFramework
+      - name: Build XCFramework
+        if: env.SKIP_RELEASE == 'false'
+        run: |
+          # Example approach; adapt if you have a custom script or Makefile.
+          # Possibly you do something like:
+          #   cd ./cmd/ios && go build ...
+          # Or you have your own "build_lib" command, etc.
+          #
+          # The line below is just an example:
+          go run ./cmd/internal/build_lib -target apple -platform ios \
+            -output Mihomo.xcframework
+          zip -ry Mihomo.xcframework.zip Mihomo.xcframework
+
+      # 7) Calculate sha256 checksum
+      - name: Calculate checksum
+        if: env.SKIP_RELEASE == 'false'
+        run: |
+          SUM="$(shasum -a 256 Mihomo.xcframework.zip)"
+          CHECKSUM="${SUM:0:64}"
+          echo "FILE_CHECKSUM=${CHECKSUM}" >> $GITHUB_ENV
+
+      # 8) Generate/Update Package.swift
+      - name: Update Package.swift
+        if: env.SKIP_RELEASE == 'false'
+        run: |
+          echo "// swift-tools-version: 5.7" > Package.swift
+          echo "" >> Package.swift
+          echo "import PackageDescription" >> Package.swift
+          echo "" >> Package.swift
+          echo "let package = Package(" >> Package.swift
+          echo "  name: \"Mihomo\"," >> Package.swift
+          echo "  platforms: [.iOS(.v12)]," >> Package.swift
+          echo "  products: [" >> Package.swift
+          echo "    .library(name: \"Mihomo\", targets: [\"Mihomo\"])" >> Package.swift
+          echo "  ]," >> Package.swift
+          echo "  targets: [" >> Package.swift
+          echo "    .binaryTarget(" >> Package.swift
+          echo "      name: \"Mihomo\"," >> Package.swift
+          echo "      url: \"https://github.com/${{ github.repository }}/releases/download/${TAG}/Mihomo.xcframework.zip\"," >> Package.swift
+          echo "      checksum: \"${FILE_CHECKSUM}\"" >> Package.swift
+          echo "    )" >> Package.swift
+          echo "  ]" >> Package.swift
+          echo ")" >> Package.swift
+
+      # 9) Commit the Package.swift update
+      - name: Commit package update
+        if: env.SKIP_RELEASE == 'false'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Mihomo Release ${TAG}"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
+          tagging_message: "${TAG}"
+          file_pattern: 'Package.swift'
+
+      # 10) Create or update the release with the zipped .xcframework
+      - name: Create GitHub Release
+        if: env.SKIP_RELEASE == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          tag_name: ${{ env.TAG }}
+          body: "Mihomo iOS XCFramework compiled from tag: ${{ env.TAG }}"
+          files: "Mihomo.xcframework.zip"
