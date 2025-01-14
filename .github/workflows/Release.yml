@@ -161,7 +161,7 @@ jobs:
       - name: Install dependencies
         if: env.SKIP_RELEASE == 'false'
         run: |
-          cd box
+          cd mihomo
           # If Mihomo has a 'make lib_install' similar to sing-box:
           make lib_install || echo "No 'make lib_install' found, skipping..."
           
@@ -176,7 +176,7 @@ jobs:
       - name: Build xcframework
         if: env.SKIP_RELEASE == 'false'
         run: |
-          cd box
+          cd mihomo
           # For sing-box, they do:
           #   go run ./cmd/internal/build_libbox -target apple -platform ios
           # Then zip. For Mihomo, adjust to your actual iOS build approach.
@@ -191,7 +191,7 @@ jobs:
       - name: Detect checksum
         if: env.SKIP_RELEASE == 'false'
         run: |
-          export TEMP="$(shasum -a 256 box/Mihomo.xcframework.zip)"
+          export TEMP="$(shasum -a 256 mihomo/Mihomo.xcframework.zip)"
           export CHECKSUM="${TEMP:0:64}"
           echo "FILE_CHECKSUM=${CHECKSUM}" >> $GITHUB_ENV
 
@@ -244,5 +244,5 @@ jobs:
           tag_name: ${{ env.TAG }}
           body: "Compiled from Mihomo source tag: ${{ env.TAG }}"
           # We reference the zipped framework
-          files: "box/Mihomo.xcframework.zip"
+          files: "mihomo/Mihomo.xcframework.zip"
           # If you're uploading more files, list them here, comma- or newline-separated
