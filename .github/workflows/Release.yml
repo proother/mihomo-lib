@@ -158,33 +158,26 @@ jobs:
       # 7) Build a universal macOS binary (amd64 + arm64)
       ####################################################
       - name: Build macOS universal binary
-        if: env.SKIP_RELEASE == 'false'
         run: |
           cd mihomo
-          # Create separate build folders
           mkdir -p build/macos-amd64 build/macos-arm64
-
-          # 1) Build for macOS/amd64
+      
+          # 1) macOS/amd64
           CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
-            go build \
-              -v -tags "with_gvisor" -trimpath \
-              -o build/macos-amd64/mihomo \
-              ./cmd
-
-          # 2) Build for macOS/arm64
+            go build -v -tags "with_gvisor" -trimpath \
+            -o build/macos-amd64/mihomo \
+            .
+      
           CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
-            go build \
-              -v -tags "with_gvisor" -trimpath \
-              -o build/macos-arm64/mihomo \
-              ./cmd
-
-          # Combine them into one universal (fat) binary via lipo
+            go build -v -tags "with_gvisor" -trimpath \
+            -o build/macos-arm64/mihomo \
+            .
+      
           lipo -create \
             -output build/mihomo-universal \
             build/macos-amd64/mihomo \
             build/macos-arm64/mihomo
-
-          # Compress the universal binary for release
+      
           cd build
           zip -ry Mihomo-macos-universal.zip mihomo-universal
 
