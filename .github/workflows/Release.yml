@@ -184,33 +184,53 @@ jobs:
       
           cd build
           zip -ry Mihomo-macos-universal.zip mihomo-universal
+      ####################################################
+      # 7.1) Build iOS XCFramework
+      ####################################################
+      - name: Build iOS library (XCFramework)
+        if: env.SKIP_RELEASE == 'false'
+        run: |
+          cd mihomo
 
+          rm -rf build/ios-arm64 build/iossimulator-arm64 build/iossimulator-x86_64
+          mkdir -p build/ios-arm64 build/iossimulator-arm64 build/iossimulator-x86_64
+
+          # 1) iOS device (arm64)
+          CGO_ENABLED=1 GOOS=ios GOARCH=arm64 \
+            CC="clang -target arm64-apple-ios16.0" \
+            go build -v -tags "with_gvisor" -trimpath \
+            -o build/ios-arm64/Mihomo.framework/Mihomo .
+
+          # 2) iOS simulator (arm64)
+          CGO_ENABLED=1 GOOS=ios GOARCH=arm64 \
+            CC="clang -target arm64-apple-ios16.0-simulator" \
+            go build -v -tags "with_gvisor" -trimpath \
+            -o build/iossimulator-arm64/Mihomo.framework/Mihomo .
+
+          xcodebuild -create-xcframework \
+            -framework build/ios-arm64/Mihomo.framework \
+            -framework build/iossimulator-arm64/Mihomo.framework \
+            -framework build/iossimulator-x86_64/Mihomo.framework \
+            -output build/Mihomo.xcframework
+
+          cd build
+          zip -r Mihomo-iOS.xcframework.zip Mihomo.xcframework
       ####################################################
       # 8) Calculate shasum
       ####################################################
       - name: Detect checksum
         if: env.SKIP_RELEASE == 'false'
         run: |
-          export TEMP="$(shasum -a 256 mihomo/build/Mihomo-macos-universal.zip)"
-          export CHECKSUM="${TEMP:0:64}"
-          echo "FILE_CHECKSUM=${CHECKSUM}" >> $GITHUB_ENV
+          # macOS zip
+          export TEMP_MAC="$(shasum -a 256 mihomo/build/Mihomo-macos-universal.zip)"
+          export CHECKSUM_MAC="${TEMP_MAC:0:64}"
 
-      ####################################################
-      # 9) (Optional) You can update a file in your repo if needed
-      #    e.g. to store checksums, versions, etc.
-      #    Otherwise, you can skip the commit step.
-      ####################################################
-      - name: Commit package update
-        if: env.SKIP_RELEASE == 'false'
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Mihomo macOS Release ${TAG}"
-          commit_user_name: "proother"
-          commit_user_email: "proother@github.com"
-          # If you have a file_pattern to update, specify it here
-          file_pattern: 'Package.swift'
-          # Or remove this step altogether if you don’t need it
+          # iOS zip
+          export TEMP_IOS="$(shasum -a 256 mihomo/build/Mihomo-iOS.xcframework.zip)"
+          export CHECKSUM_IOS="${TEMP_IOS:0:64}"
 
+          echo "MAC_CHECKSUM=${CHECKSUM_MAC}" >> $GITHUB_ENV
+          echo "IOS_CHECKSUM=${CHECKSUM_IOS}" >> $GITHUB_ENV
       ####################################################
       # 10) Create a new GitHub Release in proother/mihomo-lib
       ####################################################
@@ -218,8 +238,14 @@ jobs:
         if: env.SKIP_RELEASE == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          draft: false
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ env.TAG }}
-          body: "Compiled from Mihomo source tag: ${{ env.TAG }} for macOS (universal binary)."
-          files: "mihomo/build/Mihomo-macos-universal.zip"
+          draft: false
+          body: |
+            Compiled from Mihomo source tag: ${{ env.TAG }}.
+
+            **macOS**: \`${{ env.MAC_CHECKSUM }}\`
+            **iOS**:   \`${{ env.IOS_CHECKSUM }}\`
+          files: |
+            mihomo/build/Mihomo-macos-universal.zip
+            mihomo/build/Mihomo-iOS.xcframework.zip
