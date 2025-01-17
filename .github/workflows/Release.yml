@@ -133,8 +133,7 @@ jobs:
           fetch-depth: 0
 
       ####################################################
-      # 5) Check out the Mihomo source in subfolder `box/` (like sing-box approach)
-      #    If you want the Meta branch specifically, use 'ref: Meta'
+      # 5) Check out the Mihomo source in subfolder `mihomo/`
       ####################################################
       - name: Checkout Mihomo
         if: env.SKIP_RELEASE == 'false'
@@ -142,7 +141,7 @@ jobs:
         with:
           repository: 'MetaCubeX/mihomo'
           path: 'mihomo'
-          ref: ${{ env.TAG }}     # or 'Meta' if you specifically want that branch
+          ref: ${{ env.TAG }}
           submodules: 'recursive'
           fetch-depth: 0
 
@@ -150,93 +149,73 @@ jobs:
       # 6) Setup Go
       ####################################################
       - name: Setup Go
+        if: env.SKIP_RELEASE == 'false'
         uses: actions/setup-go@v5
         with:
           go-version: '^1.23'
 
-      - name: Install gomobile (optional)
-        run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-
-      - name: Build iOS XCFramework
+      ####################################################
+      # 7) Build a universal macOS binary (amd64 + arm64)
+      ####################################################
+      - name: Build macOS universal binary
+        if: env.SKIP_RELEASE == 'false'
         run: |
           cd mihomo
-          mkdir -p build/ios-arm64 build/ios-amd64
+          # Create separate build folders
+          mkdir -p build/macos-amd64 build/macos-arm64
 
-          # 1) iOS device (arm64)
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
-            go build -v -tags "with_gvisor" -trimpath \
-            -buildmode=c-archive \
-            -o build/ios-arm64/libmihomo.a \
-            ./cmd
-
-          # 2) iOS simulator (amd64)
+          # 1) Build for macOS/amd64
           CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
-            go build -v -tags "with_gvisor" -trimpath \
-            -buildmode=c-archive \
-            -o build/ios-amd64/libmihomo.a \
-            ./cmd
+            go build \
+              -v -tags "with_gvisor" -trimpath \
+              -o build/macos-amd64/mihomo \
+              ./cmd
 
-          xcodebuild -create-xcframework \
-            -library build/ios-arm64/libmihomo.a \
-              -headers build/ios-arm64 \
-            -library build/ios-amd64/libmihomo.a \
-              -headers build/ios-amd64 \
-            -output Mihomo.xcframework
+          # 2) Build for macOS/arm64
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+            go build \
+              -v -tags "with_gvisor" -trimpath \
+              -o build/macos-arm64/mihomo \
+              ./cmd
 
-          zip -ry Mihomo.xcframework.zip Mihomo.xcframework
+          # Combine them into one universal (fat) binary via lipo
+          lipo -create \
+            -output build/mihomo-universal \
+            build/macos-amd64/mihomo \
+            build/macos-arm64/mihomo
+
+          # Compress the universal binary for release
+          cd build
+          zip -ry Mihomo-macos-universal.zip mihomo-universal
 
       ####################################################
-      # 9) Calculate shasum
+      # 8) Calculate shasum
       ####################################################
       - name: Detect checksum
         if: env.SKIP_RELEASE == 'false'
         run: |
-          export TEMP="$(shasum -a 256 mihomo/Mihomo.xcframework.zip)"
+          export TEMP="$(shasum -a 256 mihomo/build/Mihomo-macos-universal.zip)"
           export CHECKSUM="${TEMP:0:64}"
           echo "FILE_CHECKSUM=${CHECKSUM}" >> $GITHUB_ENV
 
       ####################################################
-      # 10) Update Package.swift (so folks can integrate your XCFramework via SwiftPM)
-      ####################################################
-      - name: Update package file
-        if: env.SKIP_RELEASE == 'false'
-        run: |
-          echo "// swift-tools-version: 5.7" > Package.swift
-          echo "" >> Package.swift
-          echo "import PackageDescription" >> Package.swift
-          echo "" >> Package.swift
-          echo "let package = Package(" >> Package.swift
-          echo "  name: \"Mihomo\"," >> Package.swift
-          echo "  platforms: [.iOS(.v12)]," >> Package.swift
-          echo "  products: [" >> Package.swift
-          echo "    .library(name: \"Mihomo\", targets: [\"Mihomo\"])" >> Package.swift
-          echo "  ]," >> Package.swift
-          echo "  targets: [" >> Package.swift
-          echo "    .binaryTarget(" >> Package.swift
-          echo "      name: \"Mihomo\"," >> Package.swift
-          echo "      url: \"https://github.com/proother/mihomo-lib/releases/download/${TAG}/Mihomo.xcframework.zip\"," >> Package.swift
-          echo "      checksum: \"${FILE_CHECKSUM}\"" >> Package.swift
-          echo "    )" >> Package.swift
-          echo "  ]" >> Package.swift
-          echo ")" >> Package.swift
-
-      ####################################################
-      # 11) Commit the Package.swift update
+      # 9) (Optional) You can update a file in your repo if needed
+      #    e.g. to store checksums, versions, etc.
+      #    Otherwise, you can skip the commit step.
       ####################################################
       - name: Commit package update
         if: env.SKIP_RELEASE == 'false'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Mihomo Release ${TAG}"
+          commit_message: "Mihomo macOS Release ${TAG}"
           commit_user_name: "proother"
           commit_user_email: "proother@github.com"
-          tagging_message: "${TAG}"
+          # If you have a file_pattern to update, specify it here
           file_pattern: 'Package.swift'
+          # Or remove this step altogether if you don’t need it
 
       ####################################################
-      # 12) Create a new GitHub Release with the zipped .xcframework
+      # 10) Create a new GitHub Release in proother/mihomo-lib
       ####################################################
       - name: Upload Release
         if: env.SKIP_RELEASE == 'false'
@@ -244,7 +223,5 @@ jobs:
         with:
           draft: false
           tag_name: ${{ env.TAG }}
-          body: "Compiled from Mihomo source tag: ${{ env.TAG }}"
-          # We reference the zipped framework
-          files: "mihomo/Mihomo.xcframework.zip"
-          # If you're uploading more files, list them here, comma- or newline-separated
+          body: "Compiled from Mihomo source tag: ${{ env.TAG }} for macOS (universal binary)."
+          files: "mihomo/build/Mihomo-macos-universal.zip"
