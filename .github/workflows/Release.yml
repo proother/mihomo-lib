@@ -124,23 +124,26 @@ jobs:
           # Prepare build directories
           mkdir -p build/{darwin-amd64,darwin-arm64}
           
+          # Set build time for consistent formatting
+          BUILDTIME=$(date -u)
+          LDFLAGS="-X 'github.com/metacubex/mihomo/constant.Version=${{ env.TAG }}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME}' -w -s -buildid="
+          
           # Build amd64 version
+          echo "Building amd64 version..."
           GOARCH=amd64 GOOS=darwin GOAMD64=v3 CGO_ENABLED=0 \
-            go build -tags "with_gvisor" -trimpath \
-            -ldflags '-X "github.com/metacubex/mihomo/constant.Version=${{ env.TAG }}" \
-            -X "github.com/metacubex/mihomo/constant.BuildTime=$(date -u)" \
-            -w -s -buildid=' \
-            -o build/darwin-amd64/mihomo .
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/darwin-amd64/mihomo
           
           # Build arm64 version
+          echo "Building arm64 version..."
           GOARCH=arm64 GOOS=darwin CGO_ENABLED=0 \
-            go build -tags "with_gvisor" -trimpath \
-            -ldflags '-X "github.com/metacubex/mihomo/constant.Version=${{ env.TAG }}" \
-            -X "github.com/metacubex/mihomo/constant.BuildTime=$(date -u)" \
-            -w -s -buildid=' \
-            -o build/darwin-arm64/mihomo .
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/darwin-arm64/mihomo
           
           # Merge using lipo into universal binary
+          echo "Creating universal binary with lipo..."
           lipo -create \
             -arch arm64 build/darwin-arm64/mihomo \
             -arch x86_64 build/darwin-amd64/mihomo \
