@@ -222,7 +222,7 @@ jobs:
           cd ..
 
       # 9) Setup NDK for Android builds
-      - name: Setup Android NDK
+      - name: Setup NDK
         if: env.SKIP_RELEASE == 'false'
         uses: nttld/setup-ndk@v1
         id: setup-ndk
@@ -233,6 +233,10 @@ jobs:
       - name: Build Android binaries
         if: env.SKIP_RELEASE == 'false'
         run: |
+          # Debug NDK path
+          echo "NDK path: ${{steps.setup-ndk.outputs.ndk-path}}"
+          ls -la ${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/darwin-x86_64/bin/
+          
           # Prepare build directories
           mkdir -p build/android/{arm64-v8a,armeabi-v7a,x86,x86_64}
           
@@ -242,32 +246,32 @@ jobs:
           
           # Build arm64-v8a version (arm64)
           echo "Building Android arm64-v8a version..."
-          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang"
-          GOARCH=arm64 GOOS=android CGO_ENABLED=1 \
+          CC=${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android34-clang \
+          CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/android/arm64-v8a/mihomo
           
           # Build armeabi-v7a version (arm)
           echo "Building Android armeabi-v7a version..."
-          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi34-clang"
-          GOARCH=arm GOOS=android GOARM=7 CGO_ENABLED=1 \
+          CC=${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi34-clang \
+          CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/android/armeabi-v7a/mihomo
           
           # Build x86 version
           echo "Building Android x86 version..."
-          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android34-clang"
-          GOARCH=386 GOOS=android CGO_ENABLED=1 \
+          CC=${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/darwin-x86_64/bin/i686-linux-android34-clang \
+          CGO_ENABLED=1 GOOS=android GOARCH=386 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/android/x86/mihomo
           
           # Build x86_64 version
           echo "Building Android x86_64 version..."
-          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android34-clang"
-          GOARCH=amd64 GOOS=android CGO_ENABLED=1 \
+          CC=${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android34-clang \
+          CGO_ENABLED=1 GOOS=android GOARCH=amd64 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/android/x86_64/mihomo
