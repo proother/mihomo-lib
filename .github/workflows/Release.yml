@@ -157,11 +157,151 @@ jobs:
           # Calculate checksum
           DARWIN_CHECKSUM=$(shasum -a 256 mihomo-darwin-universal-${{ env.TAG }}.zip | cut -d ' ' -f 1)
           echo "DARWIN_CHECKSUM=${DARWIN_CHECKSUM}" >> $GITHUB_ENV
+          
+          # Go back to the root directory
+          cd ..
 
-      # 8) Build iOS binary (not implemented, can be added as needed)
-      # This part can reference the iOS build section in singbox-workflow.yml
-      
-      # 9) Create GitHub release
+      # 8) Build Windows multi-architecture package
+      - name: Build Windows binaries
+        if: env.SKIP_RELEASE == 'false'
+        run: |
+          # Prepare build directories
+          mkdir -p build/windows/{amd64,386,arm64}
+          
+          # Set build time for consistent formatting
+          BUILDTIME=$(date -u)
+          LDFLAGS="-X 'github.com/metacubex/mihomo/constant.Version=${{ env.TAG }}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME}' -w -s -buildid="
+          
+          # Build amd64 version
+          echo "Building Windows amd64 version..."
+          GOARCH=amd64 GOOS=windows GOAMD64=v3 CGO_ENABLED=0 \
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/windows/amd64/mihomo.exe
+          
+          # Build 386 version
+          echo "Building Windows 386 version..."
+          GOARCH=386 GOOS=windows CGO_ENABLED=0 \
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/windows/386/mihomo.exe
+          
+          # Build arm64 version
+          echo "Building Windows arm64 version..."
+          GOARCH=arm64 GOOS=windows CGO_ENABLED=0 \
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/windows/arm64/mihomo.exe
+          
+          # Create package with all architectures
+          cd build
+          mkdir -p mihomo-windows-all
+          cp windows/amd64/mihomo.exe mihomo-windows-all/mihomo-amd64.exe
+          cp windows/386/mihomo.exe mihomo-windows-all/mihomo-386.exe
+          cp windows/arm64/mihomo.exe mihomo-windows-all/mihomo-arm64.exe
+          
+          # Create readme file explaining the binaries
+          cat > mihomo-windows-all/README.txt << EOF
+Mihomo Windows Binaries - ${{ env.TAG }}
+
+This package contains Mihomo binaries for different Windows architectures:
+
+- mihomo-amd64.exe: For 64-bit Intel/AMD processors (most common)
+- mihomo-386.exe: For 32-bit Intel/AMD processors (older systems)
+- mihomo-arm64.exe: For ARM64 processors (newer Windows on ARM devices)
+
+Choose the appropriate version for your system.
+EOF
+          
+          # Package all Windows binaries
+          zip -ry mihomo-windows-all-${{ env.TAG }}.zip mihomo-windows-all
+          
+          # Calculate checksum
+          WINDOWS_CHECKSUM=$(shasum -a 256 mihomo-windows-all-${{ env.TAG }}.zip | cut -d ' ' -f 1)
+          echo "WINDOWS_CHECKSUM=${WINDOWS_CHECKSUM}" >> $GITHUB_ENV
+          
+          # Go back to the root directory
+          cd ..
+
+      # 9) Build Android multi-architecture package
+      - name: Build Android binaries
+        if: env.SKIP_RELEASE == 'false'
+        run: |
+          # Prepare build directories
+          mkdir -p build/android/{arm64-v8a,armeabi-v7a,x86,x86_64}
+          
+          # Set build time for consistent formatting
+          BUILDTIME=$(date -u)
+          LDFLAGS="-X 'github.com/metacubex/mihomo/constant.Version=${{ env.TAG }}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME}' -w -s -buildid="
+          
+          # Build arm64-v8a version (arm64)
+          echo "Building Android arm64-v8a version..."
+          GOARCH=arm64 GOOS=android CGO_ENABLED=0 \
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/android/arm64-v8a/mihomo
+          
+          # Build armeabi-v7a version (arm)
+          echo "Building Android armeabi-v7a version..."
+          GOARCH=arm GOOS=android GOARM=7 CGO_ENABLED=0 \
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/android/armeabi-v7a/mihomo
+          
+          # Build x86 version
+          echo "Building Android x86 version..."
+          GOARCH=386 GOOS=android CGO_ENABLED=0 \
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/android/x86/mihomo
+          
+          # Build x86_64 version
+          echo "Building Android x86_64 version..."
+          GOARCH=amd64 GOOS=android CGO_ENABLED=0 \
+            go build -tags with_gvisor -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o build/android/x86_64/mihomo
+          
+          # Create package with all architectures
+          cd build
+          mkdir -p mihomo-android-all/lib
+          
+          # Copy binaries to appropriate directories following Android convention
+          mkdir -p mihomo-android-all/lib/arm64-v8a
+          mkdir -p mihomo-android-all/lib/armeabi-v7a
+          mkdir -p mihomo-android-all/lib/x86
+          mkdir -p mihomo-android-all/lib/x86_64
+          
+          cp android/arm64-v8a/mihomo mihomo-android-all/lib/arm64-v8a/
+          cp android/armeabi-v7a/mihomo mihomo-android-all/lib/armeabi-v7a/
+          cp android/x86/mihomo mihomo-android-all/lib/x86/
+          cp android/x86_64/mihomo mihomo-android-all/lib/x86_64/
+          
+          # Create readme file explaining the Android ABI structure
+          cat > mihomo-android-all/README.txt << EOF
+Mihomo Android Binaries - ${{ env.TAG }}
+
+This package contains Mihomo binaries for different Android architectures:
+
+- lib/arm64-v8a/: For 64-bit ARM devices (most modern phones/tablets)
+- lib/armeabi-v7a/: For 32-bit ARM devices (older phones/tablets)
+- lib/x86/: For 32-bit x86 Android devices (rare)
+- lib/x86_64/: For 64-bit x86 Android devices (some tablets, Chrome OS)
+
+The directory structure follows the standard Android ABI layout.
+EOF
+          
+          # Package all Android binaries
+          zip -ry mihomo-android-all-${{ env.TAG }}.zip mihomo-android-all
+          
+          # Calculate checksum
+          ANDROID_CHECKSUM=$(shasum -a 256 mihomo-android-all-${{ env.TAG }}.zip | cut -d ' ' -f 1)
+          echo "ANDROID_CHECKSUM=${ANDROID_CHECKSUM}" >> $GITHUB_ENV
+          
+          # Go back to the root directory
+          cd ..
+
+      # 10) Create GitHub release
       - name: Create GitHub release
         if: env.SKIP_RELEASE == 'false'
         uses: softprops/action-gh-release@v2
@@ -173,5 +313,13 @@ jobs:
             
             ### macOS Universal Binary (mihomo-darwin-universal-${{ env.TAG }}.zip)
             SHA256: ${{ env.DARWIN_CHECKSUM }}
+            
+            ### Windows Multi-Architecture Package (mihomo-windows-all-${{ env.TAG }}.zip)
+            SHA256: ${{ env.WINDOWS_CHECKSUM }}
+            
+            ### Android Multi-Architecture Package (mihomo-android-all-${{ env.TAG }}.zip)
+            SHA256: ${{ env.ANDROID_CHECKSUM }}
           files: |
             build/mihomo-darwin-universal-${{ env.TAG }}.zip
+            build/mihomo-windows-all-${{ env.TAG }}.zip
+            build/mihomo-android-all-${{ env.TAG }}.zip
