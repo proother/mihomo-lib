@@ -201,17 +201,15 @@ jobs:
           cp windows/arm64/mihomo.exe mihomo-windows-all/mihomo-arm64.exe
           
           # Create readme file explaining the binaries
-          cat > mihomo-windows-all/README.txt << EOF
-Mihomo Windows Binaries - ${{ env.TAG }}
-
-This package contains Mihomo binaries for different Windows architectures:
-
-- mihomo-amd64.exe: For 64-bit Intel/AMD processors (most common)
-- mihomo-386.exe: For 32-bit Intel/AMD processors (older systems)
-- mihomo-arm64.exe: For ARM64 processors (newer Windows on ARM devices)
-
-Choose the appropriate version for your system.
-EOF
+          echo "Mihomo Windows Binaries - ${{ env.TAG }}" > mihomo-windows-all/README.txt
+          echo "" >> mihomo-windows-all/README.txt
+          echo "This package contains Mihomo binaries for different Windows architectures:" >> mihomo-windows-all/README.txt
+          echo "" >> mihomo-windows-all/README.txt
+          echo "- mihomo-amd64.exe: For 64-bit Intel/AMD processors (most common)" >> mihomo-windows-all/README.txt
+          echo "- mihomo-386.exe: For 32-bit Intel/AMD processors (older systems)" >> mihomo-windows-all/README.txt
+          echo "- mihomo-arm64.exe: For ARM64 processors (newer Windows on ARM devices)" >> mihomo-windows-all/README.txt
+          echo "" >> mihomo-windows-all/README.txt
+          echo "Choose the appropriate version for your system." >> mihomo-windows-all/README.txt
           
           # Package all Windows binaries
           zip -ry mihomo-windows-all-${{ env.TAG }}.zip mihomo-windows-all
@@ -278,18 +276,16 @@ EOF
           cp android/x86_64/mihomo mihomo-android-all/lib/x86_64/
           
           # Create readme file explaining the Android ABI structure
-          cat > mihomo-android-all/README.txt << EOF
-Mihomo Android Binaries - ${{ env.TAG }}
-
-This package contains Mihomo binaries for different Android architectures:
-
-- lib/arm64-v8a/: For 64-bit ARM devices (most modern phones/tablets)
-- lib/armeabi-v7a/: For 32-bit ARM devices (older phones/tablets)
-- lib/x86/: For 32-bit x86 Android devices (rare)
-- lib/x86_64/: For 64-bit x86 Android devices (some tablets, Chrome OS)
-
-The directory structure follows the standard Android ABI layout.
-EOF
+          echo "Mihomo Android Binaries - ${{ env.TAG }}" > mihomo-android-all/README.txt
+          echo "" >> mihomo-android-all/README.txt
+          echo "This package contains Mihomo binaries for different Android architectures:" >> mihomo-android-all/README.txt
+          echo "" >> mihomo-android-all/README.txt
+          echo "- lib/arm64-v8a/: For 64-bit ARM devices (most modern phones/tablets)" >> mihomo-android-all/README.txt
+          echo "- lib/armeabi-v7a/: For 32-bit ARM devices (older phones/tablets)" >> mihomo-android-all/README.txt
+          echo "- lib/x86/: For 32-bit x86 Android devices (rare)" >> mihomo-android-all/README.txt
+          echo "- lib/x86_64/: For 64-bit x86 Android devices (some tablets, Chrome OS)" >> mihomo-android-all/README.txt
+          echo "" >> mihomo-android-all/README.txt
+          echo "The directory structure follows the standard Android ABI layout." >> mihomo-android-all/README.txt
           
           # Package all Android binaries
           zip -ry mihomo-android-all-${{ env.TAG }}.zip mihomo-android-all
