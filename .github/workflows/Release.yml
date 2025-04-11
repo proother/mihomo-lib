@@ -1,11 +1,11 @@
-name: Release
+name: Build and Release Mihomo
 
 on:
   # (1) Manual trigger
   workflow_dispatch:
     inputs:
       tag:
-        description: "Git Tag to checkout (e.g. v1.2.3)"
+        description: "Git Tag to checkout (e.g. v1.19.3)"
         required: true
         type: string
       delete_if_exists:
@@ -18,33 +18,31 @@ on:
   schedule:
     - cron: "10 12 * * *"
 
+env:
+  REGISTRY: docker.io
+
 jobs:
   release:
-    # This ensures your GITHUB_TOKEN can create releases
+    # Ensure GITHUB_TOKEN has permission to create releases
     permissions:
       contents: write
-      # or write-all
     runs-on: macos-latest
     steps:
-      ####################################################
-      # 1) Get stable latest Mihomo release (only if triggered by schedule)
-      ####################################################
-      - name: Get stable latest Mihomo release
+      # 1) Get the latest Mihomo release (only when triggered by schedule)
+      - name: Get latest Mihomo release
         if: ${{ github.event_name == 'schedule' }}
         id: get_latest_release
         uses: actions/github-script@v7
         with:
           script: |
-            // This excludes prereleases/drafts automatically
+            // Automatically excludes prereleases/drafts
             const { data: latest } = await github.rest.repos.getLatestRelease({
               owner: 'MetaCubeX',
               repo: 'mihomo'
             })
             core.setOutput('latest_tag', latest.tag_name)
 
-      ####################################################
-      # 2) Define the TAG
-      ####################################################
+      # 2) Define TAG
       - name: Define TAG
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
@@ -54,39 +52,21 @@ jobs:
           fi
         shell: bash
 
-      ####################################################
-      # 2.1) Debug release list in proother/mihomo-lib (or your chosen repo)
-      ####################################################
-      - name: Debug release list
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          brew update
-          brew install jq gh
-
-          echo "Listing all releases (JSON) in proother/mihomo-lib:"
-          # NOTE: If you want to list releases from the same repo as the workflow,
-          #       remove "-R proother/mihomo-lib"
-          gh api repos/proother/mihomo-lib/releases \
-            --paginate \
-            --jq '.[] | [.tag_name, .isDraft, .isPrerelease] | @tsv'
-
-      ####################################################
-      # 3) Check if release already exists in proother/mihomo-lib
-      ####################################################
+      # 3) Check if release already exists
       - name: Check if release already exists
         id: check_existing_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "=== [DEBUG] Checking for existing release in proother/mihomo-lib..."
+          brew update
+          which gh >/dev/null 2>&1 || brew install gh
+          which jq >/dev/null 2>&1 || brew install jq
+          
+          echo "=== [DEBUG] Checking if release exists ==="
           echo "TAG='${TAG}' (length=${#TAG})"
       
-          echo "=== gh release list (showing hidden chars) ==="
-          gh release list --json tagName -R proother/mihomo-lib --limit 100 | od -c
-
           existing_release=$(
-            gh release list --json tagName -R proother/mihomo-lib --limit 100 \
+            gh release list --json tagName --limit 100 \
               | jq -r '.[].tagName' \
               | grep -x "${TAG}" \
               | wc -l
@@ -99,10 +79,8 @@ jobs:
             echo "SKIP_RELEASE=false" >> $GITHUB_ENV
           fi
 
-      ####################################################
-      # 3.1) Conditionally delete the existing release if user wants that
-      ####################################################
-      - name: Delete existing release if user requested
+      # 3.1) Delete existing release if requested by user
+      - name: Delete existing release if requested
         if: >
           github.event_name == 'workflow_dispatch' &&
           env.SKIP_RELEASE == 'true' &&
@@ -110,142 +88,87 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Deleting existing release '${TAG}' from proother/mihomo-lib..."
-          gh release delete "${TAG}" -R proother/mihomo-lib -y
+          echo "Deleting existing release '${TAG}'..."
+          gh release delete "${TAG}" -y --cleanup-tag 
           echo "Successfully deleted release '${TAG}'."
-          # Proceed with creation
           echo "SKIP_RELEASE=false" >> $GITHUB_ENV
 
-      ####################################################
-      # 4) Stop job if release still exists
-      ####################################################
+      # 4) Stop job if release already exists
       - name: Stop job if release already exists
         if: env.SKIP_RELEASE == 'true'
         run: |
-          echo "Nothing to do. Release/tag '${{ env.TAG }}' already found."
+          echo "Nothing to do. Release/tag '${{ env.TAG }}' already exists."
 
-      ####################################################
-      # 4.1) Checkout current repository
-      #      (So we have a valid git repo for auto-commit, if needed)
-      ####################################################
-      - name: Checkout current repository
-        if: env.SKIP_RELEASE == 'false'
-        uses: actions/checkout@v4
-        with:
-          # By default, this checks out the same repo where the workflow runs
-          # e.g. proother/mihomo-lib. 
-          fetch-depth: 0
-
-      ####################################################
-      # 5) Check out the Mihomo source in subfolder `mihomo/`
-      ####################################################
-      - name: Checkout Mihomo
+      # 5) Checkout Mihomo code
+      - name: Checkout Mihomo code
         if: env.SKIP_RELEASE == 'false'
         uses: actions/checkout@v4
         with:
           repository: 'MetaCubeX/mihomo'
-          path: 'mihomo'
           ref: ${{ env.TAG }}
           submodules: 'recursive'
           fetch-depth: 0
 
-      ####################################################
-      # 6) Setup Go
-      ####################################################
-      - name: Setup Go
+      # 6) Setup Go environment
+      - name: Setup Go environment
         if: env.SKIP_RELEASE == 'false'
         uses: actions/setup-go@v5
         with:
-          go-version: '^1.23'
+          go-version: '^1.24'
+          cache: true
 
-      ####################################################
-      # 7) Build a universal macOS binary (amd64 + arm64)
-      ####################################################
+      # 7) Build macOS universal binary
       - name: Build macOS universal binary
+        if: env.SKIP_RELEASE == 'false'
         run: |
-          cd mihomo
-          mkdir -p build/macos-amd64 build/macos-arm64
-      
-          # 1) macOS/amd64
-          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
-            go build -v -tags "with_gvisor" -trimpath \
-            -o build/macos-amd64/mihomo \
-            .
-      
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
-            go build -v -tags "with_gvisor" -trimpath \
-            -o build/macos-arm64/mihomo \
-            .
-      
+          # Prepare build directories
+          mkdir -p build/{darwin-amd64,darwin-arm64}
+          
+          # Build amd64 version
+          GOARCH=amd64 GOOS=darwin GOAMD64=v3 CGO_ENABLED=0 \
+            go build -tags "with_gvisor" -trimpath \
+            -ldflags '-X "github.com/metacubex/mihomo/constant.Version=${{ env.TAG }}" \
+            -X "github.com/metacubex/mihomo/constant.BuildTime=$(date -u)" \
+            -w -s -buildid=' \
+            -o build/darwin-amd64/mihomo .
+          
+          # Build arm64 version
+          GOARCH=arm64 GOOS=darwin CGO_ENABLED=0 \
+            go build -tags "with_gvisor" -trimpath \
+            -ldflags '-X "github.com/metacubex/mihomo/constant.Version=${{ env.TAG }}" \
+            -X "github.com/metacubex/mihomo/constant.BuildTime=$(date -u)" \
+            -w -s -buildid=' \
+            -o build/darwin-arm64/mihomo .
+          
+          # Merge using lipo into universal binary
           lipo -create \
-            -output build/mihomo-universal \
-            build/macos-amd64/mihomo \
-            build/macos-arm64/mihomo
+            -arch arm64 build/darwin-arm64/mihomo \
+            -arch x86_64 build/darwin-amd64/mihomo \
+            -output build/mihomo-darwin-universal
+          
+          # Package
+          cd build
+          chmod +x mihomo-darwin-universal
+          zip -ry mihomo-darwin-universal-${{ env.TAG }}.zip mihomo-darwin-universal
+          
+          # Calculate checksum
+          DARWIN_CHECKSUM=$(shasum -a 256 mihomo-darwin-universal-${{ env.TAG }}.zip | cut -d ' ' -f 1)
+          echo "DARWIN_CHECKSUM=${DARWIN_CHECKSUM}" >> $GITHUB_ENV
+
+      # 8) Build iOS binary (not implemented, can be added as needed)
+      # This part can reference the iOS build section in singbox-workflow.yml
       
-          cd build
-          zip -ry Mihomo-macos-universal.zip mihomo-universal
-      ####################################################
-      # 7.1) Build iOS XCFramework
-      ####################################################
-      - name: Build iOS library (XCFramework)
-        if: env.SKIP_RELEASE == 'false'
-        run: |
-          cd mihomo
-
-          rm -rf build/ios-arm64 build/iossimulator-arm64 build/iossimulator-x86_64
-          mkdir -p build/ios-arm64 build/iossimulator-arm64 build/iossimulator-x86_64
-
-          # 1) iOS device (arm64)
-          CGO_ENABLED=1 GOOS=ios GOARCH=arm64 \
-            CC="clang -target arm64-apple-ios16.0" \
-            go build -v -tags "with_gvisor" -trimpath \
-            -o build/ios-arm64/Mihomo.framework/Mihomo .
-
-          # 2) iOS simulator (arm64)
-          CGO_ENABLED=1 GOOS=ios GOARCH=arm64 \
-            CC="clang -target arm64-apple-ios16.0-simulator" \
-            go build -v -tags "with_gvisor" -trimpath \
-            -o build/iossimulator-arm64/Mihomo.framework/Mihomo .
-
-          xcodebuild -create-xcframework \
-            -framework build/ios-arm64/Mihomo.framework \
-            -framework build/iossimulator-arm64/Mihomo.framework \
-            -framework build/iossimulator-x86_64/Mihomo.framework \
-            -output build/Mihomo.xcframework
-
-          cd build
-          zip -r Mihomo-iOS.xcframework.zip Mihomo.xcframework
-      ####################################################
-      # 8) Calculate shasum
-      ####################################################
-      - name: Detect checksum
-        if: env.SKIP_RELEASE == 'false'
-        run: |
-          # macOS zip
-          export TEMP_MAC="$(shasum -a 256 mihomo/build/Mihomo-macos-universal.zip)"
-          export CHECKSUM_MAC="${TEMP_MAC:0:64}"
-
-          # iOS zip
-          export TEMP_IOS="$(shasum -a 256 mihomo/build/Mihomo-iOS.xcframework.zip)"
-          export CHECKSUM_IOS="${TEMP_IOS:0:64}"
-
-          echo "MAC_CHECKSUM=${CHECKSUM_MAC}" >> $GITHUB_ENV
-          echo "IOS_CHECKSUM=${CHECKSUM_IOS}" >> $GITHUB_ENV
-      ####################################################
-      # 10) Create a new GitHub Release in proother/mihomo-lib
-      ####################################################
-      - name: Upload Release
+      # 9) Create GitHub release
+      - name: Create GitHub release
         if: env.SKIP_RELEASE == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ env.TAG }}
           draft: false
           body: |
-            Compiled from Mihomo source tag: ${{ env.TAG }}.
-
-            **macOS**: \`${{ env.MAC_CHECKSUM }}\`
-            **iOS**:   \`${{ env.IOS_CHECKSUM }}\`
+            Built from Mihomo source tag: ${{ env.TAG }}
+            
+            ### macOS Universal Binary (mihomo-darwin-universal-${{ env.TAG }}.zip)
+            SHA256: ${{ env.DARWIN_CHECKSUM }}
           files: |
-            mihomo/build/Mihomo-macos-universal.zip
-            mihomo/build/Mihomo-iOS.xcframework.zip
+            build/mihomo-darwin-universal-${{ env.TAG }}.zip
