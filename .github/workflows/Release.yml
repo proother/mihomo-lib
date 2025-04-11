@@ -129,14 +129,14 @@ jobs:
           LDFLAGS="-X 'github.com/metacubex/mihomo/constant.Version=${{ env.TAG }}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME}' -w -s -buildid="
           
           # Build amd64 version
-          echo "Building amd64 version..."
+          echo "Building macOS amd64 version..."
           GOARCH=amd64 GOOS=darwin GOAMD64=v3 CGO_ENABLED=0 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/darwin-amd64/mihomo
           
           # Build arm64 version
-          echo "Building arm64 version..."
+          echo "Building macOS arm64 version..."
           GOARCH=arm64 GOOS=darwin CGO_ENABLED=0 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
@@ -221,7 +221,15 @@ jobs:
           # Go back to the root directory
           cd ..
 
-      # 9) Build Android multi-architecture package
+      # 9) Setup NDK for Android builds
+      - name: Setup Android NDK
+        if: env.SKIP_RELEASE == 'false'
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r28-beta1
+
+      # 10) Build Android multi-architecture package
       - name: Build Android binaries
         if: env.SKIP_RELEASE == 'false'
         run: |
@@ -234,28 +242,32 @@ jobs:
           
           # Build arm64-v8a version (arm64)
           echo "Building Android arm64-v8a version..."
-          GOARCH=arm64 GOOS=android CGO_ENABLED=0 \
+          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang"
+          GOARCH=arm64 GOOS=android CGO_ENABLED=1 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/android/arm64-v8a/mihomo
           
           # Build armeabi-v7a version (arm)
           echo "Building Android armeabi-v7a version..."
-          GOARCH=arm GOOS=android GOARM=7 CGO_ENABLED=0 \
+          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi34-clang"
+          GOARCH=arm GOOS=android GOARM=7 CGO_ENABLED=1 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/android/armeabi-v7a/mihomo
           
           # Build x86 version
           echo "Building Android x86 version..."
-          GOARCH=386 GOOS=android CGO_ENABLED=0 \
+          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android34-clang"
+          GOARCH=386 GOOS=android CGO_ENABLED=1 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/android/x86/mihomo
           
           # Build x86_64 version
           echo "Building Android x86_64 version..."
-          GOARCH=amd64 GOOS=android CGO_ENABLED=0 \
+          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android34-clang"
+          GOARCH=amd64 GOOS=android CGO_ENABLED=1 \
             go build -tags with_gvisor -trimpath \
             -ldflags "${LDFLAGS}" \
             -o build/android/x86_64/mihomo
@@ -297,7 +309,7 @@ jobs:
           # Go back to the root directory
           cd ..
 
-      # 10) Create GitHub release
+      # 11) Create GitHub release
       - name: Create GitHub release
         if: env.SKIP_RELEASE == 'false'
         uses: softprops/action-gh-release@v2
